@@ -336,6 +336,26 @@ cp .env.example .env      # 按需修改后 docker compose up -d
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `GOPROXY` | `https://goproxy.cn,direct` | 模块代理。国内构建**必须**用镜像，否则 `proxy.golang.org` 超时 |
+| `ALPINE_MIRROR` | `mirrors.cloud.tencent.com` | apk 源。`dl-cdn.alpinelinux.org` 国内常不可达 |
+
+若构建时出现域名解析失败（`bad address` / `temporary error`），说明 BuildKit
+构建容器没拿到可用 DNS，在 `docker-compose.yml` 的 `build` 段启用 `network: host`。
+详见 [docs/docker-deployment.md](docs/docker-deployment.md) 排障章节。
+
+### 公网部署安全
+
+暴露到公网前**必须**：
+
+```bash
+# .env
+GATEWAY_BIND=0.0.0.0
+GATEWAY_API_KEY=***   # 用 openssl rand -hex 32 生成，留空 = 完全不鉴权！
+```
+
+注意裸 HTTP 直连是**明文传输**，密钥与对话内容可被中间人窃取；
+长期使用建议置于 nginx/Caddy 反代之后并启用 HTTPS。
+另外 `/health`、`/ping`、`/` 三个端点**不受鉴权保护**，会暴露版本号等
+信息（不暴露凭据），必要时在反代层屏蔽。
 
 > 容器默认**非 root 运行**（uid 1000，entrypoint 经 `su-exec` 降权）；
 > 启动阶段短暂使用 root 只为修正挂载目录属主，避免非 root 用户写不进 `./data`。

@@ -240,6 +240,68 @@ dial tcp 142.250.73.81:443: i/o timeout
 docker compose build --build-arg GOPROXY=https://goproxy.cn,direct
 ```
 
+### 构建时 `apk add` 报 temporary error / no such package
+
+```
+WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.20/community: temporary error (try again later)
+ERROR: unable to select packages:
+  ca-certificates (no such package)
+```
+
+`dl-cdn.alpinelinux.org` 在国内常不可达。改用国内 apk 源：
+
+```bash
+docker compose build --build-arg ALPINE_MIRROR=mirrors.cloud.tencent.com
+```
+
+实测（腾讯云主机）：`mirrors.cloud.tencent.com` 稳定可用；
+`mirrors.aliyun.com` 会出现 apk temporary error（但宿主机 curl 却是 200，**别被误导**）；
+`tuna` / `ustc` 返回 403。
+
+### 构建时域名解析失败（`bad address`）——最隐蔽
+
+现象：宿主机 `curl` 域名正常、`docker run` 容器内也正常，
+**唯独 `docker build` 的 RUN 步骤报解析失败**。
+
+**先诊断 DNS，再怀疑镜像源**，避免白折腾：
+
+```bash
+docker build --network=host -t nettest -f- . <<'EOF'
+FROM alpine:3.20
+RUN cat /etc/resolv.conf
+EOF
+```
+
+若输出形如 `nameserver fe80::5%enp2s0`（只有 IPv6 链路本地 DNS），
+说明 BuildKit 构建容器没拿到可用 DNS。解绑办法是在 compose 的 build 段加：
+
+```yaml
+    build:
+      context: .
+      network: host      # 继承宿主机 DNS
+```
+
+或命令行 `docker build --network=host .`。
+
+> 该配置**因主机而异**：有的主机 buildkit DNS 正常（加了反而会用宿主 DNS 出问题），
+> 故 compose 里默认注释掉。按需启用。
+
+### 无法本地构建时的替代方案：搬运镜像
+
+若目标主机网络受限导致构建始终失败，可在另一台能构建的机器上构建后搬运：
+
+```bash
+# 在能构建的机器上
+docker save workbuddy-gateway:latest | gzip -1 > wb.tar.gz
+
+# 传到目标机
+scp wb.tar.gz user@target:/tmp/
+ssh user@target 'gunzip -c /tmp/wb.tar.gz | docker load'
+
+# 跳过构建直接启动
+docker compose up -d --no-build
+```
+
 ### 容器内 `permission denied` 写文件失败
 
 现象：日志出现 `open wb-models-cache.json.tmp: permission denied`，或 `login` 无法保存凭据。
