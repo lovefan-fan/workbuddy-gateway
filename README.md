@@ -273,6 +273,73 @@ llm-pi-ai:
           maxTokens: 128000
 ```
 
+## Docker / Docker Compose 部署
+
+无需安装 Go 或配置编译环境，一条命令拉起。完整文档见 **[docs/docker-deployment.md](docs/docker-deployment.md)**。
+
+### 快速开始
+
+```bash
+# 1) 首次扫码登录（交互式，必须用 run）
+docker compose run --rm login          # 国内站：微信/企业微信扫码
+docker compose run --rm login -intl    # 国际站：浏览器内完成登录
+
+# 2) 启动网关
+docker compose up -d
+
+# 3) 验证
+curl http://127.0.0.1:8317/health
+```
+
+客户端接入地址：`http://127.0.0.1:8317/v1`
+
+### 目录结构
+
+compose 把 `./data` 挂载为容器内的 `/app`（唯一持久化点）：
+
+```text
+./data/
+├── auths/workbuddy*.json    # 凭据（账号池），扫码登录后自动写入
+├── workbuddy-status.json    # serve 实时快照，monitor/status 读取
+└── logs/gateway-*.log       # 运行日志
+```
+
+**多账号**：把多个 `workbuddy*.json` 放进 `./data/auths/` 即组成轮询池；
+运行期**凭据热加载**，新增/更新/删除凭据均免重启，国内站与国际站账号可混挂。
+
+### 运维命令
+
+```bash
+docker compose run --rm cli status     # 账号池状态与额度
+docker compose run --rm cli refresh    # 手动刷新所有令牌
+docker compose run --rm cli monitor    # 前台实时监控
+docker compose logs -f gateway         # 跟随服务日志
+```
+
+### 配置
+
+```bash
+cp .env.example .env      # 按需修改后 docker compose up -d
+```
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `GATEWAY_PORT` | `8317` | 监听端口 |
+| `GATEWAY_BIND` | `127.0.0.1` | 绑定地址；改 `0.0.0.0` 开放局域网时**务必**设密钥 |
+| `GATEWAY_API_KEY` | 空 | 启用客户端 Bearer 鉴权（`/health` 免鉴权） |
+| `UPSTREAM_PROXY` | 空 | 上游出口代理，如 `http://172.17.0.1:7890` |
+| `TZ` | `Asia/Shanghai` | 时区（每日签到按 UTC+8 09:00） |
+| `PUID` / `PGID` | `1000` | 容器内运行身份，需与 `./data` 属主一致（entrypoint 会自动修正） |
+
+### 构建参数
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `GOPROXY` | `https://goproxy.cn,direct` | 模块代理。国内构建**必须**用镜像，否则 `proxy.golang.org` 超时 |
+
+> 容器默认**非 root 运行**（uid 1000，entrypoint 经 `su-exec` 降权）；
+> 启动阶段短暂使用 root 只为修正挂载目录属主，避免非 root 用户写不进 `./data`。
+
 ## 各平台使用方法
 
 ### Windows

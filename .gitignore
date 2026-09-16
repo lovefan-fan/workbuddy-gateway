@@ -20,3 +20,7 @@ logs/
 *.tmp
 .DS_Store
 Thumbs.db
+
+# Docker 部署产物（凭据/状态/日志均落在 data/，严禁提交）
+data/
+.env

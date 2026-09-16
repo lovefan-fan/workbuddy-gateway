@@ -1,0 +1,23 @@
+# 统一换行符：shell 脚本/Dockerfile 必须为 LF，
+# 否则在 Linux 容器内出现 `#!/bin/sh\r: not found` 或 Dockerfile 解析错误。
+* text=auto
+
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.dockerignore  text eol=lf
+.dockerignore   text eol=lf
+docker-compose.yml text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+*.go            text eol=lf
+*.mod           text eol=lf
+*.sum           text eol=lf
+
+*.ps1           text eol=crlf
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+*.png           binary
+*.jpg           binary
+*.exe           binary

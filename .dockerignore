@@ -1,0 +1,34 @@
+# 构建上下文排除项 —— 避免把凭据/产物/仓库元数据打进镜像
+.git
+.gitignore
+.github
+
+# 凭据与敏感数据（切勿进镜像！）
+workbuddy*.json
+workbuddy*.json.disabled
+*.json.bak
+last-*.json
+wb-models-cache.json*
+.workbuddy-*.json
+
+# 运行期产物
+logs/
+*.log
+workbuddy-status.json
+workbuddy-status.json.tmp
+data/
+
+# 本地编译产物
+workbuddy-gateway
+workbuddy-gateway.exe
+dist/
+
+# 文档与开发文件（不影响构建，减小上下文）
+README.md
+*.md
+build.ps1
+*_test.go
+.dockerignore
+docker-compose.yml
+.env
+.env.*

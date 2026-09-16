@@ -1,0 +1,125 @@
+# ---------------------------------------------------------------------------
+# WorkBuddy Local Gateway —— docker compose 部署
+#
+# 快速开始：
+#   1) 首次登录（交互式扫码，必须用 run 而非 up）：
+#        docker compose run --rm login                 # 国内站（微信/企业微信扫码）
+#        docker compose run --rm login -intl           # 国际站（浏览器内完成登录）
+#      扫码完成后凭据写入 ./data/auths/workbuddy*.json
+#   2) 启动网关：
+#        docker compose up -d
+#   3) 验证：
+#        curl http://127.0.0.1:8317/health
+#        curl http://127.0.0.1:8317/v1/models
+#
+# 多账号池：把多个 workbuddy*.json 放进 ./data/auths/ 即可（round-robin 轮询），
+#          运行期凭据热加载，新增/更新/删除均免重启。
+#
+# 环境变量（可写入 .env，参考 .env.example）：
+#   GATEWAY_PORT      宿主机/容器端口，默认 8317
+#   GATEWAY_BIND      宿主机绑定地址，默认 127.0.0.1（仅本机）；局域网改 0.0.0.0
+#   GATEWAY_API_KEY   网关访问密钥（非空即启用 Bearer 鉴权）
+#   UPSTREAM_PROXY    上游出口代理，如 http://172.17.0.1:7890
+#   MODELS_REFRESH    模型目录刷新间隔（分钟），默认 60，0 关闭
+#   TZ                时区，默认 Asia/Shanghai（国内站每日签到依赖）
+# ---------------------------------------------------------------------------
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GO_VERSION: "1.26"
+    image: workbuddy-gateway:latest
+    container_name: workbuddy-gateway
+
+    # 容器内监听 0.0.0.0（容器网络天然隔离，不设则只监听 loopback 无法映射）；
+    # -auth-dir / -api-key / -proxy 由 entrypoint 包装脚本按环境变量补全
+    command:
+      - serve
+      - -addr=0.0.0.0
+      - -port=${GATEWAY_PORT:-8317}
+      - -reload-interval=5
+      - -models-refresh=${MODELS_REFRESH:-60}
+
+    # 默认仅宿主机可访问（最安全）。需要局域网访问时把 GATEWAY_BIND 改成 0.0.0.0，
+    # 此时【务必】同时设置 GATEWAY_API_KEY。
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:${GATEWAY_PORT:-8317}:${GATEWAY_PORT:-8317}/tcp"
+
+    volumes:
+      # 单一持久化挂载点：/app 下同时容纳
+      #   auths/workbuddy*.json      凭据（账号池）
+      #   workbuddy-status.json      monitor/status 读取的实时快照
+      #   logs/gateway-*.log         运行日志
+      # 挂载整个 /app 可保证 serve 与 cli/monitor 的工作目录内容完全一致。
+      - ./data:/app
+
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      GATEWAY_PORT: ${GATEWAY_PORT:-8317}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+      UPSTREAM_PROXY: ${UPSTREAM_PROXY:-}
+      GATEWAY_EXTRA_ARGS: ${GATEWAY_EXTRA_ARGS:-}
+      # 运行身份：须与宿主机 ./data 目录属主一致（默认 1000）。
+      # 目录由 root 创建时保持 0（脚本会自行修正属主），或直接设 0 以 root 运行。
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+
+    # 交互式 login（docker compose run）需要：保持 stdin 打开 + 分配 TTY。
+    # docker compose up -d 时这两项无副作用。
+    stdin_open: true
+    tty: true
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:${GATEWAY_PORT:-8317}/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------------------------------------------------------
+  # 一次性登录：docker compose run --rm login [参数]
+  #   国内站:   docker compose run --rm login
+  #   国际站:   docker compose run --rm login -intl
+  #   指定文件名: docker compose run --rm login -auth /app/auths/workbuddy-2.json
+  # 凭据写入挂载卷，运行中的 gateway 会在数秒内热加载纳入账号池，无需重启。
+  # -------------------------------------------------------------------------
+  login:
+    image: workbuddy-gateway:latest
+    profiles: ["cli"]
+    working_dir: /app
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+    command: ["login"]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./data:/app
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+
+  # -------------------------------------------------------------------------
+  # 辅助命令（须与 gateway 共用卷，读同一份 state/logs）：
+  #   docker compose run --rm cli status     # 查看账号池与额度
+  #   docker compose run --rm cli refresh    # 手动刷新所有令牌
+  #   docker compose run --rm cli monitor    # 前台实时监控（Ctrl+C 退出）
+  # -------------------------------------------------------------------------
+  cli:
+    image: workbuddy-gateway:latest
+    profiles: ["cli"]
+    working_dir: /app
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+    command: ["status"]
+    volumes:
+      - ./data:/app
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
