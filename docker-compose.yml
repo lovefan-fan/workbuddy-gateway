@@ -29,8 +29,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # 注意：默认不使用 network: host。
+      # 若构建时 apk add / go mod 报域名解析失败（"bad address"/"temporary error"），
+      # 说明 buildkit 构建容器没拿到可用 DNS（其 /etc/resolv.conf 可能只有
+      # IPv6 链路本地地址）。此时再加下面一行并重建：
+      # network: host
       args:
         GO_VERSION: "1.26"
+        # 国内网络构建加速：Go 模块代理 + Alpine apk 源
+        # 海外构建可覆盖为 proxy.golang.org / dl-cdn.alpinelinux.org
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-mirrors.cloud.tencent.com}
     image: workbuddy-gateway:latest
     container_name: workbuddy-gateway
 
