@@ -46,11 +46,21 @@ fi
 CMD="$1"
 shift
 
-# 凭据目录缺省值：调用方未显式指定 -auth / -auth-dir 时统一指向挂载点
+# 凭据路径缺省值。注意 login 与其他子命令的参数语义不同：
+#   - serve/status/refresh 用 -auth-dir <目录>（自动发现目录下所有 workbuddy*.json）
+#   - login 用 -auth <文件路径>（参数名不同！）
+# 若给 login 追加 -auth-dir 是无效的，凭据会落到工作目录根的 workbuddy.json，
+# 而 serve 扫描的是 auths/ 目录 → 出现「登录成功但账号池为 0」。
 case "$CMD" in
-    serve|login|status|refresh)
+    login)
         case " $* " in
             *" -auth "*|*" -auth-dir "*) : ;;   # 已显式指定，不干预
+            *) set -- "$@" -auth "$AUTH_DIR/workbuddy.json" ;;
+        esac
+        ;;
+    serve|status|refresh)
+        case " $* " in
+            *" -auth "*|*" -auth-dir "*) : ;;
             *) set -- "$@" -auth-dir "$AUTH_DIR" ;;
         esac
         ;;
