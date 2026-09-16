@@ -51,11 +51,27 @@ shift
 #   - login 用 -auth <文件路径>（参数名不同！）
 # 若给 login 追加 -auth-dir 是无效的，凭据会落到工作目录根的 workbuddy.json，
 # 而 serve 扫描的是 auths/ 目录 → 出现「登录成功但账号池为 0」。
+#
+# login 还需自动避让已有文件名，否则重复登录会覆盖上一个账号的凭据：
+#   workbuddy.json 已存在 → 自动改用 workbuddy2.json（依序递增）。
+# 想指定文件名时显式传 -auth 即可，例如：
+#   docker compose run --rm login -auth /app/auths/workbuddy-intl.json
 case "$CMD" in
     login)
         case " $* " in
             *" -auth "*|*" -auth-dir "*) : ;;   # 已显式指定，不干预
-            *) set -- "$@" -auth "$AUTH_DIR/workbuddy.json" ;;
+            *)
+                target="$AUTH_DIR/workbuddy.json"
+                if [ -f "$target" ]; then
+                    n=2
+                    while [ -f "$AUTH_DIR/workbuddy$n.json" ]; do
+                        n=$((n + 1))
+                    done
+                    target="$AUTH_DIR/workbuddy$n.json"
+                    echo "[entrypoint] auths/workbuddy.json 已存在，改用 $(basename "$target")（多账号模式）"
+                fi
+                set -- "$@" -auth "$target"
+                ;;
         esac
         ;;
     serve|status|refresh)
