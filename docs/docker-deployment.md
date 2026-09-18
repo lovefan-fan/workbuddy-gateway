@@ -126,7 +126,17 @@ docker compose up -d
 docker compose run --rm cli status     # 账号池状态：可用/冷却/额度/Token 有效期
 docker compose run --rm cli refresh    # 手动立即刷新所有访问令牌
 docker compose run --rm cli monitor    # 前台实时监控（Ctrl+C 退出）
+docker compose run --rm cli probe      # 探测账号对指定模型的免费/收费属性
+docker compose run --rm cli reset      # 清空状态/缓存/日志（保留凭据）并重拉模型目录
 docker compose run --rm cli version    # 版本
+```
+
+`probe` 常用参数：
+
+```bash
+docker compose run --rm cli probe -limit 5                        # 探测目录前 5 个模型
+docker compose run --rm cli probe -models hy4-preview,hy3-x       # 指定模型
+docker compose run --rm cli probe -auth /app/auths/workbuddy.json # 只看某个账号
 ```
 
 `monitor` 也可附加日志：
@@ -135,6 +145,22 @@ docker compose run --rm cli version    # 版本
 docker compose run --rm cli monitor -journal workbuddy-gateway
 docker compose run --rm cli monitor -lines 8
 ```
+
+### 为什么 cli 要共享 gateway 的网络
+
+`probe` 不是本地命令 —— 它通过 HTTP 调用运行中网关的 `/admin/probe`。
+该接口在程序内**只接受回环地址**（其它来源一律返回
+`403 probe_local_only`），这是防止管理接口被外部滥用的安全设计。
+
+compose 中为 `cli` 配置：
+
+```yaml
+    network_mode: "service:gateway"    # 共享 gateway 的网络命名空间
+```
+
+这样 `cli` 发出的请求源地址就是 `127.0.0.1`，可通过回环校验，
+且**无需**把管理接口暴露到公网。若改成用服务名寻址（如 `-addr gateway`），
+会因源地址是容器网段而被拒。
 
 ---
 
@@ -301,6 +327,38 @@ ssh user@target 'gunzip -c /tmp/wb.tar.gz | docker load'
 # 跳过构建直接启动
 docker compose up -d --no-build
 ```
+
+### 升级后 `/v1/models` 返回空
+
+```
+[Models] 模型缓存无效或格式版本过旧，忽略
+   模型列表来源:   unavailable
+```
+
+v1.12.0 起模型目录改为「实时接口 + npm 合并 + 倍率」的新格式，与旧版缓存
+不兼容。执行一次 `reset` 重新拉取即可（凭据会保留）：
+
+```bash
+docker compose run --rm cli reset
+```
+
+该命令另可清空状态快照、运行日志、失效标记。若 `serve` 正在运行，
+按提示重启以让内存状态同步归零：
+
+```bash
+docker compose restart gateway
+```
+
+### probe 返回 403 probe_local_only
+
+`probe` 走后端 `/admin/probe`，该接口只接受**回环地址**调用。
+容器场景须让 `cli` 共享 gateway 的网络命名空间：
+
+```yaml
+    network_mode: "service:gateway"
+```
+
+用服务名寻址（源地址为容器网段）会被拒。这是程序设计，不要试图绕过。
 
 ### 容器内 `permission denied` 写文件失败
 

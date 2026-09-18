@@ -121,6 +121,14 @@ services:
   #   docker compose run --rm cli status     # 查看账号池与额度
   #   docker compose run --rm cli refresh    # 手动刷新所有令牌
   #   docker compose run --rm cli monitor    # 前台实时监控（Ctrl+C 退出）
+  #   docker compose run --rm cli probe      # 探测模型免费/收费属性
+  #   docker compose run --rm cli reset      # 清空状态/缓存/日志（保留凭据）
+  #
+  # network_mode: service:gateway —— 关键！
+  #   probe 走 HTTP 调 gateway 的 /admin/probe，而该接口在上游实现中
+  #   仅允许回环地址调用（非 127.0.0.1 返回 403 probe_local_only）。
+  #   共享 gateway 的网络命名空间后，本服务发出的请求源地址即 127.0.0.1，
+  #   可直接用 -addr 127.0.0.1 访问，无需暴露管理接口。
   # -------------------------------------------------------------------------
   cli:
     image: workbuddy-gateway:latest
@@ -128,7 +136,15 @@ services:
     working_dir: /app
     entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
     command: ["status"]
+    network_mode: "service:gateway"
     volumes:
       - ./data:/app
     environment:
       TZ: ${TZ:-Asia/Shanghai}
+      GATEWAY_PORT: ${GATEWAY_PORT:-8317}
+      # probe 与 gateway 共享网络命名空间，直接走回环即可
+      GATEWAY_PROBE_ADDR: ${GATEWAY_PROBE_ADDR:-127.0.0.1}
+      # 网关启用了密钥时，probe 需携带同一密钥才能通过鉴权
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+    depends_on:
+      - gateway

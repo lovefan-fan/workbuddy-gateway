@@ -10,13 +10,15 @@
 # 环境变量：
 #   PUID / PGID        运行身份（默认 1000:1000），须与宿主机挂载目录属主一致
 #   RUN_AS_ROOT=1      跳过降权，以 root 运行（不推荐）
-#   GATEWAY_API_KEY    非空时给 serve 追加 -api-key（客户端 Bearer 鉴权）
+#   GATEWAY_API_KEY    非空时给 serve 追加 -api-key；probe 会自动携带同一密钥
 #   UPSTREAM_PROXY     非空时给 serve 追加 -proxy（上游出口代理）
+#   GATEWAY_PROBE_ADDR probe 访问的网关地址（容器内默认 gateway，即 compose 服务名）
 #   GATEWAY_EXTRA_ARGS 额外 CLI 参数（空格分隔），原样追加到末尾
 #
 # 用法与原生 CLI 完全一致：
 #   docker compose run --rm login -intl    →  login -intl
-#   docker compose run --rm cli status     →  status
+#   docker compose run --rm cli status     →  status -auth-dir /app/auths
+#   docker compose run --rm cli probe      →  probe -addr gateway -port 8317 -api-key ***
 # ---------------------------------------------------------------------------
 set -e
 
@@ -39,27 +41,27 @@ fi
 
 if [ -z "$1" ]; then
     echo "用法: <command> [args...]" >&2
-    echo "命令: serve | login | status | refresh | monitor | version | help" >&2
+    echo "命令: serve | login | status | refresh | monitor | probe | reset | version | help" >&2
     exit 1
 fi
 
 CMD="$1"
 shift
 
-# 凭据路径缺省值。注意 login 与其他子命令的参数语义不同：
-#   - serve/status/refresh 用 -auth-dir <目录>（自动发现目录下所有 workbuddy*.json）
-#   - login 用 -auth <文件路径>（参数名不同！）
-# 若给 login 追加 -auth-dir 是无效的，凭据会落到工作目录根的 workbuddy.json，
-# 而 serve 扫描的是 auths/ 目录 → 出现「登录成功但账号池为 0」。
+# ---------------------------------------------------------------------------
+# 参数补全。各子命令语义不同，逐个处理（不要想当然复用）：
 #
-# login 还需自动避让已有文件名，否则重复登录会覆盖上一个账号的凭据：
-#   workbuddy.json 已存在 → 自动改用 workbuddy2.json（依序递增）。
-# 想指定文件名时显式传 -auth 即可，例如：
-#   docker compose run --rm login -auth /app/auths/workbuddy-intl.json
+#   login                      -auth <文件>    保存凭据到该文件
+#   serve/status/refresh/reset -auth-dir <目录> 扫描目录下所有 workbuddy*.json
+#   probe                      无凭据参数可用；它通过 HTTP 调用运行中的 serve
+#                              （POST /admin/probe），需 -addr/-port/-api-key
+#   monitor                    读工作目录的 workbuddy-status.json，无需参数
+# ---------------------------------------------------------------------------
 case "$CMD" in
     login)
+        # 未显式指定时自动分配不冲突的文件名，避免第二次登录覆盖第一个账号
         case " $* " in
-            *" -auth "*|*" -auth-dir "*) : ;;   # 已显式指定，不干预
+            *" -auth "*|*" -auth-dir "*) : ;;
             *)
                 target="$AUTH_DIR/workbuddy.json"
                 if [ -f "$target" ]; then
@@ -74,18 +76,34 @@ case "$CMD" in
                 ;;
         esac
         ;;
-    serve|status|refresh)
+
+    serve|status|refresh|reset|run|start)
         case " $* " in
             *" -auth "*|*" -auth-dir "*) : ;;
             *) set -- "$@" -auth-dir "$AUTH_DIR" ;;
         esac
         ;;
+
+    probe)
+        # 通过 HTTP 访问运行中的 serve。容器场景下 serve 在 gateway 服务里，
+        # 由 GATEWAY_PROBE_ADDR 指定（compose 默认 gateway:8317）。
+        # -auth 用于筛选探测哪个账号，属可选，故不自动追加。
+        case " $* " in
+            *" -addr "*) : ;;
+            *) set -- "$@" -addr "${GATEWAY_PROBE_ADDR:-gateway}" ;;
+        esac
+        case " $* " in
+            *" -port "*) : ;;
+            *) set -- "$@" -port "${GATEWAY_PORT:-8317}" ;;
+        esac
+        ;;
 esac
 
 # 可选：网关访问鉴权
+#   serve 用 -api-key 设定密钥；probe 用同一个 -api-key 自动携带
 if [ -n "$GATEWAY_API_KEY" ]; then
     case "$CMD" in
-        serve) set -- "$@" -api-key "$GATEWAY_API_KEY" ;;
+        serve|probe) set -- "$@" -api-key "$GATEWAY_API_KEY" ;;
     esac
 fi
 
